@@ -368,7 +368,7 @@ document.addEventListener('click',e=>{
   const a=el.dataset.act;
   if(a==='login'){ui.who=el.dataset.who;ui.tab=null;ui.week=null}
   else if(a==='logout'){ui.who=null}
-  else if(a==='home'){ui.tab=null;ui.week=null;ui.group='beg2';ui.filter='all';window.scrollTo(0,0)}
+  else if(a==='home'){ui.who=null;ui.tab=null;ui.week=null;ui.group='beg2';ui.filter='all';window.scrollTo(0,0)}
   else if(a==='tab'){ui.tab=el.dataset.tab;window.scrollTo(0,0)}
   else if(a==='group'){ui.group=el.dataset.g}
   else if(a==='filter'){ui.filter=el.dataset.f}
