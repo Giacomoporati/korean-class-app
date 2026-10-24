@@ -125,7 +125,7 @@ footer{text-align:center;font-size:12px;color:var(--muted);padding:12px 16px 4px
 <div id="root"><p style="padding:60px 16px;text-align:center">Loading…</p></div>
 <div id="toast" class="toast" hidden></div>
 <div id="busy" class="busy" hidden>Saving…</div>
-<footer>Version 2.4 (24 Oct) · Hangeul Institute Dublin</footer>
+<footer>Version 2.5 (24 Oct) · Hangeul Institute Dublin · <a href="privacy.html">Privacy</a></footer>
 
 <script>
 /* ---------- Connection (publishable key is safe to be public; security is enforced by database rules) */
@@ -234,7 +234,7 @@ function vAuth(){
       <div class="field"><label for="fn">Full name</label><input class="inp" id="fn" type="text" autocomplete="name" required></div>
       <div class="field"><label for="em">Email</label><input class="inp" id="em" type="email" autocomplete="email" required></div>
       <div class="field"><label for="pw">Password (at least 8 characters)</label><input class="inp" id="pw" type="password" autocomplete="new-password" minlength="8" required></div>
-      <label class="check2"><input type="checkbox" id="agree" required><span>I agree that Hangeul Institute Dublin stores my name and email to manage my classes and payments.</span></label>
+      <label class="check2"><input type="checkbox" id="agree" required><span>I am 18 or over and I have read the <a href="privacy.html" target="_blank" rel="noopener">Privacy notice</a> (how my data is used).</span></label>
       <button class="btn btn-main" type="submit">Create account</button>
       <div class="links"><button type="button" class="link" data-act="auth" data-v="login">I already have an account</button></div>
     </form>`;
@@ -316,6 +316,7 @@ function vStudentInfo(){
     <p><b>Cancellation:</b> rescheduling is only possible with at least 24 hours' notice. Same-day cancellations or changes within the 24-hour window count as a completed lesson.</p>
     <p><b>Refunds:</b> no refunds for a change of mind or personal reasons. A refund or credit is only issued with an official doctor's certificate for medical reasons (please send it by email).</p>
     <p><b>Invoices:</b> available on request.</p></div>
+  <div class="card"><h3>🔒 Your data</h3><p style="margin:0">See how your data is used in our <a href="privacy.html" target="_blank" rel="noopener">Privacy notice</a>. To see, correct or delete your data, email <a href="mailto:hazelminjeong@gmail.com">hazelminjeong@gmail.com</a>.</p></div>
   <div class="card"><h3>📍 Where</h3><p style="margin:0">${ADDRESS}<br><span class="small muted">Some classes are online; check your schedule.</span></p></div>`;
 }
 
