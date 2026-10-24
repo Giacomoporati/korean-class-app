@@ -125,7 +125,7 @@ footer{text-align:center;font-size:12px;color:var(--muted);padding:12px 16px 4px
 <div id="root"><p style="padding:60px 16px;text-align:center">Loading…</p></div>
 <div id="toast" class="toast" hidden></div>
 <div id="busy" class="busy" hidden>Saving…</div>
-<footer>Version 2.5 (24 Oct) · Hangeul Institute Dublin · <a href="privacy.html">Privacy</a></footer>
+<footer>Version 2.6 (24 Oct) · Hangeul Institute Dublin · <a href="privacy.html">Privacy</a></footer>
 
 <script>
 /* ---------- Connection (publishable key is safe to be public; security is enforced by database rules) */
@@ -404,6 +404,8 @@ function vTeacherMoney(){
   <div class="card tile ${due?'red':''}"><div class="lbl">Still owed</div><div class="big">${eur(due)}</div><div class="small muted">${late.length} overdue</div></div></div>
   <div class="card"><h3>Received by type</h3><ul class="list">${Object.entries(by).map(([k,v])=>`<li><span>${k}</span><b>${eur(v)}</b></li>`).join('')||'<li class="muted">Nothing yet.</li>'}</ul></div>
   <div class="card"><h3>Who owes</h3><ul class="list">${all.filter(p=>p.status==='due').map(p=>`<li><span><b>${esc(p.who)}</b> · ${esc(p.ref)}<br><span class="small muted">${esc(p.description)} · ${eur(p.amount)}</span></span>${p.guest?'<span class="badge b-due">Game Day</span>':payBadge(p)}</li>`).join('')||'<li class="muted">Nobody, all paid!</li>'}</ul></div>
+  <div class="card"><h3>💾 Backup</h3><p class="small muted" style="margin:0">Download everything as one Excel file: students, payments, attendance, private lessons and lesson plans. Do it once a month and keep it somewhere safe (it contains students' personal data, so don't share it).</p>
+    <button class="btn btn-main" data-act="export">Download backup (Excel)</button></div>
   <div class="card"><h3>🏦 Bank details & links shown to students</h3>
     <div class="field"><label for="bName">Account name</label><input class="inp" id="bName" type="text" value="${esc(st.account_name)}"></div>
     <div class="field"><label for="bIban">IBAN</label><input class="inp" id="bIban" type="text" value="${esc(st.iban)}"></div>
@@ -414,6 +416,37 @@ function vTeacherMoney(){
     <p class="small muted" style="margin:0 0 6px">These two buttons only appear for students who have paid (at least one payment marked paid, nothing overdue).</p>
     <button class="btn btn-main" data-act="savebank">Save details</button>
     <p class="small muted" style="margin:8px 0 0">Only logged-in students can see these.</p></div>`;
+}
+
+/* ---------- BACKUP (Excel) */
+function loadXLSX(){
+  if(window.XLSX) return Promise.resolve();
+  return new Promise((res,rej)=>{const sc=document.createElement('script');sc.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';sc.onload=res;sc.onerror=()=>rej(new Error('Could not load the Excel tool. Check your internet and try again.'));document.head.appendChild(sc)});
+}
+async function exportBackup(){
+  try{
+    busy(true); await loadXLSX(); await loadAll();
+    const gName=k=>k?GROUPS[k].name:'', d10=t=>t?String(t).slice(0,10):'', time=t=>t?new Date(t).toLocaleString('en-IE',{dateStyle:'short',timeStyle:'short'}):'';
+    const info={}; terms().forEach(tw=>numbered(tw).forEach(w=>info[w.id]=w));
+    const wk=id=>info[id]||{};
+    const studentsRows=students().map(p=>({Name:nm(p),Email:p.email,Reference:p.ref,Group:gName(p.group_code),Trial:gName(p.trial_group),'Private pack':p.pack_size||'','Photo consent':p.photo_consent?'Yes':'No',Joined:d10(p.created_at)}));
+    const payRows=S.payments.map(p=>{const s=prof(p.student_id);return {Student:nm(s),Reference:s.ref,Description:p.description,'Amount (€)':Number(p.amount),Status:p.status==='paid'?'Paid':'Due','Due date':p.due_date||'','Paid on':d10(p.paid_at),Added:d10(p.created_at)}})
+      .concat(S.guests.flatMap(g=>[
+        {Student:g.name+' (Game Day guest)',Reference:g.ref,Description:'Game Day: €10 upfront','Amount (€)':10,Status:g.deposit_status==='paid'?'Paid':'Due','Due date':wk(g.week_id).date||'','Paid on':'',Added:d10(g.created_at)},
+        {Student:g.name+' (Game Day guest)',Reference:g.ref,Description:'Game Day: €15 in person','Amount (€)':15,Status:g.on_day_status==='paid'?'Paid':'Due','Due date':wk(g.week_id).date||'','Paid on':'',Added:d10(g.created_at)}]));
+    const attRows=S.attendance.map(a=>{const s=prof(a.student_id),w=wk(a.week_id);return {Date:w.date||'',Class:w.no||'',Group:gName(s.group_code||s.trial_group),Student:nm(s),Present:a.present?'Yes':'No'}}).sort((a,b)=>(a.Date+a.Group+a.Student).localeCompare(b.Date+b.Group+b.Student));
+    const privRows=S.privates.map(p=>({Student:nm(prof(p.student_id)),'Date & time':time(p.starts_at),Status:{booked:'Booked',done:'Done',resched:'Asked to reschedule',cancelled:'Cancelled'}[p.status]||p.status}));
+    const planRows=S.plans.filter(p=>p.plan).map(p=>{const w=wk(p.week_id);return {Date:w.date||'',Class:w.no||'',Group:gName(p.group_code),'Lesson plan':p.plan}}).sort((a,b)=>(a.Date+a.Group).localeCompare(b.Date+b.Group));
+    const wb=XLSX.utils.book_new();
+    const add=(rows,name,cols)=>{const ws=XLSX.utils.json_to_sheet(rows.length?rows:[Object.fromEntries(cols.map(c=>[c,'']))],{header:cols});ws['!cols']=cols.map(c=>({wch:Math.max(12,c.length+2,...rows.map(r=>String(r[c]??'').length+2).slice(0,500))>60?60:Math.max(12,c.length+2,...rows.map(r=>String(r[c]??'').length+2))}));XLSX.utils.book_append_sheet(wb,ws,name)};
+    add(studentsRows,'Students',['Name','Email','Reference','Group','Trial','Private pack','Photo consent','Joined']);
+    add(payRows,'Payments',['Student','Reference','Description','Amount (€)','Status','Due date','Paid on','Added']);
+    add(attRows,'Attendance',['Date','Class','Group','Student','Present']);
+    add(privRows,'Private lessons',['Student','Date & time','Status']);
+    add(planRows,'Lesson plans',['Date','Class','Group','Lesson plan']);
+    XLSX.writeFile(wb,'hangeul-institute-backup-'+ymd(new Date())+'.xlsx');
+    toast('Backup downloaded');
+  }catch(e){console.error(e);toast('⚠️ '+(e.message||e))}finally{busy(false)}
 }
 
 /* ---------- SHELL */
@@ -503,6 +536,7 @@ document.addEventListener('click',e=>{
   if(a==='addpriv') return run(async()=>{const s=val('pStu'),t=val('pWhen');if(!s||!t)throw new Error('Choose a student and a date/time');await q(sb.from('private_lessons').insert({student_id:s,starts_at:new Date(t).toISOString()}))},'Lesson booked');
   if(a==='pstatus') return run(()=>q(sb.from('private_lessons').update({status:d.s}).eq('id',d.id)),d.s==='done'?'Lesson marked done':'Lesson cancelled');
   if(a==='resched') return run(()=>q(sb.rpc('request_reschedule',{lesson_id:d.id})),'Reschedule request sent to your teacher');
+  if(a==='export'){exportBackup();return}
   if(a==='savebank') return run(async()=>{
     await q(sb.from('settings').update({account_name:val('bName'),iban:val('bIban'),bic:val('bBic'),review_url:val('bRev'),updated_at:new Date().toISOString()}).eq('id',1));
     await q(sb.from('class_links').update({classroom_url:val('hClass'),teams_url:val('hTeams')}).eq('id',1));
