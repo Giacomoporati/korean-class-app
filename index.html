@@ -136,7 +136,7 @@ footer{text-align:center;font-size:12px;color:var(--muted);padding:12px 16px 4px
 <div id="root"><p style="padding:60px 16px;text-align:center">Loading…</p></div>
 <div id="toast" class="toast" hidden></div>
 <div id="busy" class="busy" hidden>Saving…</div>
-<footer>Version 3.3 (24 Oct) · Hangeul Institute Dublin · <a href="privacy.html">Privacy</a></footer>
+<footer>Version 3.4 (24 Oct) · Hangeul Institute Dublin · <a href="privacy.html">Privacy</a></footer>
 
 <script>
 /* ---------- Connection (publishable key is safe to be public; security is enforced by database rules) */
@@ -170,7 +170,7 @@ const nextSaturday=()=>{const d=today();d.setDate(d.getDate()+((6-d.getDay()+7)%
 const val=id=>{const el=document.getElementById(id);return el?el.value.trim():''};
 
 /* ---------- state */
-let S={session:null,me:null,settings:{},weeks:[],profiles:[],payments:[],privates:[],attendance:[],plans:[],guests:[],auth:'login',err:'',ok:'',loaded:false};
+let S={session:null,me:null,settings:{},weeks:[],profiles:[],payments:[],privates:[],attendance:[],plans:[],guests:[],enrollments:[],auth:'login',err:'',ok:'',loaded:false};
 let ui={tab:null,week:null,group:'beg2',filter:'all'};
 const isT=()=>S.me&&S.me.role==='teacher';
 const prof=id=>S.profiles.find(p=>p.id===id)||{full_name:'(removed)',email:''};
@@ -189,19 +189,21 @@ async function loadAll(){
     q(sb.from('class_links').select('*').eq('id',1))]);
   Object.assign(S,{me,settings,weeks,links:links[0]||null});
   if(me.role==='teacher'){
-    const [profiles,payments,privates,attendance,plans,guests]=await Promise.all([
+    const [profiles,payments,privates,attendance,plans,guests,enrollments]=await Promise.all([
       q(sb.from('profiles').select('*').order('full_name')),
       q(sb.from('payments').select('*').order('created_at')),
       q(sb.from('private_lessons').select('*').order('starts_at')),
       q(sb.from('attendance').select('*')),
       q(sb.from('lesson_plans').select('*')),
-      q(sb.from('game_day_guests').select('*').order('created_at'))]);
-    Object.assign(S,{profiles,payments,privates,attendance,plans,guests});
+      q(sb.from('game_day_guests').select('*').order('created_at')),
+      q(sb.from('enrollments').select('*'))]);
+    Object.assign(S,{profiles,payments,privates,attendance,plans,guests,enrollments});
   }else{
-    const [payments,privates]=await Promise.all([
+    const [payments,privates,enrollments]=await Promise.all([
       q(sb.from('payments').select('*').eq('student_id',uid).order('created_at')),
-      q(sb.from('private_lessons').select('*').eq('student_id',uid).order('starts_at'))]);
-    Object.assign(S,{profiles:[me],payments,privates,attendance:[],plans:[],guests:[]});
+      q(sb.from('private_lessons').select('*').eq('student_id',uid).order('starts_at')),
+      q(sb.from('enrollments').select('*').eq('student_id',uid))]);
+    Object.assign(S,{profiles:[me],payments,privates,attendance:[],plans:[],guests:[],enrollments});
   }
   S.loaded=true;
 }
@@ -212,6 +214,8 @@ const gapWeeks=(a,b)=>Math.round((pd(b)-pd(a))/(7*DAY))-1;
 function term(){const t=today(),ts=terms();return ts.find(x=>pd(x[x.length-1].date)>=t)||ts[ts.length-1]||[]}
 function allWeeks(){return terms().flatMap((tw,ti)=>numbered(tw).map(w=>({...w,term:ti+1,termW:tw})))}
 function termAfter(tw){if(!tw.length)return null;const end=pd(tw[tw.length-1].date);return terms().find(x=>pd(x[0].date)>end)||null}
+const isBooked=(sid,tw)=>!!tw&&tw.length>0&&S.enrollments.some(e=>e.student_id===sid&&e.course_week_id===tw[0].id);
+function myCourse(sid){const t=today();return terms().find(tw=>isBooked(sid,tw)&&pd(tw[tw.length-1].date)>=t)||null}
 function numbered(tw){let n=0;return tw.map(w=>w.type==='break'?{...w,no:null,kind:'break'}:(n++,{...w,no:n,kind:n===10?'game':'class'}))}
 const termOver=tw=>!tw.length||pd(tw[tw.length-1].date)<today();
 const breakStart=tw=>addDays(tw[tw.length-1].date,7);
@@ -272,7 +276,7 @@ function vAuth(){
 
 /* ---------- STUDENT */
 function vStudentHome(){
-  const me=S.me, t=today(), tw=numbered(term());
+  const me=S.me, t=today(), mc=me.group_code?myCourse(me.id):null, tw=numbered(me.group_code?(mc||[]):term());
   let h=ttl('Hi, '+esc((me.full_name||'there').split(' ')[0])+'!','안녕하세요');
   const g=me.group_code||me.trial_group;
   if(!g&&!me.pack_size) return h+`<div class="card"><h3>You're registered 🎉</h3><p style="margin:0">Your teacher will add you to your class soon.</p><p class="small muted">Your payment reference: <b>${esc(me.ref)}</b></p></div>`;
@@ -284,7 +288,7 @@ function vStudentHome(){
     const left=tw.filter(w=>w.kind!=='break'&&pd(w.date)>=t).length;
     h+=`<div class="card"><div class="row"><h3>${G.name}${!me.group_code?' (trial)':''}</h3><span class="muted small">Saturdays ${G.time}</span></div>
       ${next?`<p style="margin:6px 0 2px" class="muted small">Next class</p><div class="row"><b style="font-size:20px">${fd(next.date)}</b>${weekBadge(next)}</div>
-      <p class="small muted" style="margin:6px 0 0">${next.mode==='online'?'Online: tap “Online class” at class time':'📍 '+ADDRESS}</p>`:'<p style="margin:0">The next term dates will appear here soon.</p>'}</div>`;
+      <p class="small muted" style="margin:6px 0 0">${next.mode==='online'?'Online: tap “Online class” at class time':'📍 '+ADDRESS}</p>`:(me.group_code&&!mc?'<p style="margin:0">You are not booked into a course yet. Message Hazel to book your place for the next course.</p>':'<p style="margin:0">The next course dates will appear here soon.</p>')}</div>`;
     if(me.group_code&&tw.length){
       const brk=tw.find(w=>w.kind==='break'&&pd(w.date)>=t), nt=termAfter(tw), bw=nt?gapWeeks(tw[tw.length-1].date,nt[0].date):S.settings.break_weeks;
       h+=`<div class="grid2"><div class="card tile"><div class="lbl">Classes left</div><div class="big">${left}</div><div class="small muted">this term</div></div>
@@ -345,9 +349,10 @@ function vAddClasses(){
   const def=lastT.length?nextTerm(lastT):nextSaturday();
   return `<div class="card"><h3>➕ Add classes</h3>
     <div class="seg" style="margin-bottom:10px"><button class="btn btn-sm ${m==='auto'?'btn-main':'btn-ghost'}" data-act="addmode" data-m="auto">Automatic</button><button class="btn btn-sm ${m==='manual'?'btn-main':'btn-ghost'}" data-act="addmode" data-m="manual">Manual</button></div>
-    ${m==='auto'?`<p class="small muted" style="margin:0 0 10px">Pick the first Saturday. The app creates 10 weekly classes; class 10 is Game Day.</p>
+    ${m==='auto'?`<p class="small muted" style="margin:0 0 10px">Pick the first class and how many weekly classes you want. Class 10 is Game Day.</p>
     <div class="field"><label for="termStart">First class</label><input class="inp" id="termStart" type="date" value="${def}"></div>
-    <button class="btn btn-main" data-act="startterm">Create 10 classes</button>`
+    <div class="field"><label for="termCount">Number of classes</label><input class="inp" id="termCount" type="number" min="1" max="30" value="10"></div>
+    <button class="btn btn-main" data-act="startterm">Create classes</button>`
     :`<p class="small muted" style="margin:0 0 10px">Add one class on any date you choose (for example an extra lesson or a make-up class).</p>
     <div class="field"><label for="oneDate">Date</label><input class="inp" id="oneDate" type="date" value="${def}"></div>
     <div class="field"><label for="oneMode">Where</label><select class="inp" id="oneMode"><option value="offline">In person</option><option value="online">Online</option><option value="break">Break week (no class)</option></select></div>
@@ -372,9 +377,11 @@ function vEditClass(w){
 }
 function vTeacherClasses(){
   const raw=term(), tw=numbered(raw);
-  let h=ttl('Classes','수업')+`<div class="chips">${Object.entries(GROUPS).map(([k,g])=>`<button class="chip ${ui.group===k?'on':''}" data-act="group" data-g="${k}">${g.name} (${students().filter(s=>s.group_code===k).length}/${g.cap})</button>`).join('')}<button class="chip ${ui.group==='private'?'on':''}" data-act="group" data-g="private">Private</button></div>`;
-  if(ui.group==='private') return h+vTeacherPrivate();
   const AW=allWeeks(), ts=terms(), lastT=ts[ts.length-1]||[];
+  const curW=(ui.week!=null&&AW[ui.week])||AW.find(w=>w.kind!=='break'&&pd(w.date)>=today())||AW[AW.length-1];
+  const booked=k=>curW?students().filter(s=>s.group_code===k&&isBooked(s.id,curW.termW)).length:0;
+  let h=ttl('Classes','수업')+`<div class="chips">${Object.entries(GROUPS).map(([k,g])=>`<button class="chip ${ui.group===k?'on':''}" data-act="group" data-g="${k}">${g.name} (${booked(k)}/${g.cap})</button>`).join('')}<button class="chip ${ui.group==='private'?'on':''}" data-act="group" data-g="private">Private</button></div>`;
+  if(ui.group==='private') return h+vTeacherPrivate();
   if(!AW.length) return h+vAddClasses();
   if(ui.jumpTo){const j=AW.findIndex(x=>x.date===ui.jumpTo);if(j>=0){ui.week=j;ui.jumpTo=null}}
   if(ui.week==null||ui.week>=AW.length){const i=AW.findIndex(w=>w.kind!=='break'&&pd(w.date)>=today());ui.week=i<0?AW.length-1:i}
@@ -405,7 +412,13 @@ function vTeacherClasses(){
       <button class="btn btn-ghost" data-act="addguest" data-w="${w.id}">Add guest</button></div>
 `;
   }
-  const list=students().filter(s=>s.group_code===ui.group||s.trial_group===ui.group);
+  const cid=w.termW[0].id, members=students().filter(s=>s.group_code===ui.group);
+  const list=members.filter(s=>isBooked(s.id,w.termW)).concat(students().filter(s=>s.trial_group===ui.group));
+  const prev=ts[ts.findIndex(t=>t[0].id===w.termW[0].id)-1];
+  h+=`<div class="card"><div class="row"><h3>📋 Booked for this course</h3><b>${members.filter(s=>isBooked(s.id,w.termW)).length}/${GROUPS[ui.group].cap}</b></div>
+    <p class="small muted" style="margin:0 0 6px">Course starting ${fd(w.termW[0].date)}. Only booked students are in attendance and see the schedule.</p>
+    ${members.map(s=>`<button class="att ${isBooked(s.id,w.termW)?'on':''}" data-act="book" data-id="${s.id}" data-c="${cid}"><span class="box">${isBooked(s.id,w.termW)?'✓':''}</span><span style="flex:1">${esc(nm(s))}</span><span class="small muted">${isBooked(s.id,w.termW)?'Booked':'Not booked'}</span></button>`).join('')||'<p class="muted" style="margin:0">No students in this group yet. Set their group in Students.</p>'}
+    ${prev&&members.some(s=>isBooked(s.id,prev)&&!isBooked(s.id,w.termW))?`<button class="btn btn-ghost" data-act="bookprev" data-c="${cid}" data-p="${prev[0].id}">Book everyone from the previous course</button>`:''}</div>`;
   const att=new Set(S.attendance.filter(a=>a.week_id===w.id).map(a=>a.student_id));
   const plan=(S.plans.find(p=>p.week_id===w.id&&p.group_code===ui.group)||{}).plan||'';
   h+=`<div class="card"><div class="row"><h3>Attendance</h3><b>${list.filter(s=>att.has(s.id)).length}/${list.length}</b></div>
@@ -428,7 +441,7 @@ function vTeacherStudents(){
   const list=(ui.filter==='removed'?allStudents().filter(p=>p.archived):students()).filter(F[ui.filter]);
   const opt=(v,cur,l)=>`<option value="${v}" ${String(cur??'')===String(v)?'selected':''}>${l}</option>`;
   return `${ttl('Students','학생')}<div class="chips">${[['all','All'],['none','New / no class'],['trial','Trial'],['owes','Owe money'],['beg2','Beginner Lv2'],['imp','Improver'],['private','Private'],['removed','Removed']].map(([k,l])=>`<button class="chip ${ui.filter===k?'on':''}" data-act="filter" data-f="${k}">${l}</button>`).join('')}</div>
-  ${list.map(s=>`<div class="card"><div class="row"><div><b style="font-size:18px">${esc(nm(s))}</b><br><span class="small muted">${esc(s.email)} · Ref ${esc(s.ref)}</span></div><span title="Instagram photo consent" class="badge ${s.photo_consent?'b-paid':'b-off'}">📸 ${s.photo_consent?'Yes':'No'}</span></div>
+  ${list.map(s=>`<div class="card"><div class="row"><div><b style="font-size:18px">${esc(nm(s))}</b><br><span class="small muted">${esc(s.email)} · Ref ${esc(s.ref)}</span>${s.group_code?`<br><span class="small">${terms().filter(tw=>isBooked(s.id,tw)).map(tw=>'📋 '+fd(tw[0].date)).join(' · ')||'<span class="badge b-due">Not booked in any course</span>'}</span>`:''}</div><span title="Instagram photo consent" class="badge ${s.photo_consent?'b-paid':'b-off'}">📸 ${s.photo_consent?'Yes':'No'}</span></div>
     <div class="grid3">
       <div><label>Group</label><select data-change="prof" data-id="${s.id}" data-f="group_code">${opt('',s.group_code,'None')}${opt('beg2',s.group_code,'Beginner Lv2')}${opt('imp',s.group_code,'Improver')}</select></div>
       <div><label>Trial</label><select data-change="prof" data-id="${s.id}" data-f="trial_group">${opt('',s.trial_group,'None')}${opt('beg2',s.trial_group,'Beginner Lv2')}${opt('imp',s.trial_group,'Improver')}</select></div>
@@ -612,16 +625,27 @@ document.addEventListener('click',e=>{
     for(const x of later) await q(sb.from('weeks').update({date:addDays(x.date,delta)}).eq('id',x.id));
     ui.week=null; ui.jumpTo=target;
   },'Break updated');
+  if(a==='book') return run(async()=>{
+    const c=Number(d.c), has=S.enrollments.some(e=>e.student_id===d.id&&e.course_week_id===c);
+    if(has) await q(sb.from('enrollments').delete().eq('student_id',d.id).eq('course_week_id',c));
+    else await q(sb.from('enrollments').insert({student_id:d.id,course_week_id:c}));
+  });
+  if(a==='bookprev') return run(async()=>{
+    const c=Number(d.c), p=Number(d.p);
+    const ids=students().filter(s=>s.group_code===ui.group&&S.enrollments.some(e=>e.student_id===s.id&&e.course_week_id===p)&&!S.enrollments.some(e=>e.student_id===s.id&&e.course_week_id===c)).map(s=>s.id);
+    if(ids.length) await q(sb.from('enrollments').insert(ids.map(id=>({student_id:id,course_week_id:c}))));
+  },'Students booked');
   if(a==='startterm') return run(async()=>{
     const s=val('termStart'); if(!s) throw new Error('Pick a date first');
     if(pd(s).getDay()!==6&&!confirm('That date is not a Saturday. Use it anyway?')) return;
     const have=new Set(S.weeks.map(x=>x.date));
-    const rows=[...Array(10)].map((_,i)=>({date:addDays(s,7*i),type:'class',mode:'offline',new_term:i===0})).filter(r=>!have.has(r.date));
+    const cnt=Math.max(1,Math.min(30,parseInt(val('termCount'),10)||10));
+    const rows=[...Array(cnt)].map((_,i)=>({date:addDays(s,7*i),type:'class',mode:'offline',new_term:i===0})).filter(r=>!have.has(r.date));
     if(!rows.length) throw new Error('This term already exists. Use ▶ to see it.');
-    if(rows.length<10&&!confirm('Some of these Saturdays are already in another term. Add only the '+rows.length+' free dates?')) return;
+    if(rows.length<cnt&&!confirm('Some of these Saturdays are already in another term. Add only the '+rows.length+' free dates?')) return;
     await q(sb.from('weeks').insert(rows));
     ui.week=null; ui.jumpTo=s;
-  },'Term created: 10 classes');
+  },'Course created');
   if(a==='brk') return run(()=>q(sb.from('settings').update({break_weeks:Number(d.n),updated_at:new Date().toISOString()}).eq('id',1)),'Break updated');
   if(a==='addguest') return run(async()=>{const n=val('gName');if(!n)throw new Error('Type the guest name first');await q(sb.from('game_day_guests').insert({week_id:Number(d.w),name:n,contact:val('gContact')||null}))},'Guest added');
   if(a==='delguest'){if(!confirm('Remove '+d.n+' from the Game Day guests?'))return;return run(()=>q(sb.from('game_day_guests').delete().eq('id',d.id)),'Guest removed')}
