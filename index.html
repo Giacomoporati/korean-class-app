@@ -125,7 +125,7 @@ footer{text-align:center;font-size:12px;color:var(--muted);padding:12px 16px 4px
 <div id="root"><p style="padding:60px 16px;text-align:center">Loading…</p></div>
 <div id="toast" class="toast" hidden></div>
 <div id="busy" class="busy" hidden>Saving…</div>
-<footer>Version 2.6 (24 Oct) · Hangeul Institute Dublin · <a href="privacy.html">Privacy</a></footer>
+<footer>Version 2.7 (24 Oct) · Hangeul Institute Dublin · <a href="privacy.html">Privacy</a></footer>
 
 <script>
 /* ---------- Connection (publishable key is safe to be public; security is enforced by database rules) */
@@ -429,7 +429,9 @@ async function exportBackup(){
     const gName=k=>k?GROUPS[k].name:'', d10=t=>t?String(t).slice(0,10):'', time=t=>t?new Date(t).toLocaleString('en-IE',{dateStyle:'short',timeStyle:'short'}):'';
     const info={}; terms().forEach(tw=>numbered(tw).forEach(w=>info[w.id]=w));
     const wk=id=>info[id]||{};
-    const studentsRows=students().map(p=>({Name:nm(p),Email:p.email,Reference:p.ref,Group:gName(p.group_code),Trial:gName(p.trial_group),'Private pack':p.pack_size||'','Photo consent':p.photo_consent?'Yes':'No',Joined:d10(p.created_at)}));
+    const sumFor=(id,st)=>S.payments.filter(x=>x.student_id===id&&x.status===st).reduce((t,x)=>t+Number(x.amount),0);
+    const studentsRows=students().map(p=>({Name:nm(p),Email:p.email,Reference:p.ref,Group:gName(p.group_code),Trial:gName(p.trial_group),'Private pack':p.pack_size||'','Total paid (€)':sumFor(p.id,'paid'),'Still owed (€)':sumFor(p.id,'due'),'Photo consent':p.photo_consent?'Yes':'No',Joined:d10(p.created_at)}));
+    if(studentsRows.length) studentsRows.push({Name:'TOTAL','Total paid (€)':studentsRows.reduce((t,r)=>t+r['Total paid (€)'],0),'Still owed (€)':studentsRows.reduce((t,r)=>t+r['Still owed (€)'],0)});
     const payRows=S.payments.map(p=>{const s=prof(p.student_id);return {Student:nm(s),Reference:s.ref,Description:p.description,'Amount (€)':Number(p.amount),Status:p.status==='paid'?'Paid':'Due','Due date':p.due_date||'','Paid on':d10(p.paid_at),Added:d10(p.created_at)}})
       .concat(S.guests.flatMap(g=>[
         {Student:g.name+' (Game Day guest)',Reference:g.ref,Description:'Game Day: €10 upfront','Amount (€)':10,Status:g.deposit_status==='paid'?'Paid':'Due','Due date':wk(g.week_id).date||'','Paid on':'',Added:d10(g.created_at)},
@@ -439,7 +441,7 @@ async function exportBackup(){
     const planRows=S.plans.filter(p=>p.plan).map(p=>{const w=wk(p.week_id);return {Date:w.date||'',Class:w.no||'',Group:gName(p.group_code),'Lesson plan':p.plan}}).sort((a,b)=>(a.Date+a.Group).localeCompare(b.Date+b.Group));
     const wb=XLSX.utils.book_new();
     const add=(rows,name,cols)=>{const ws=XLSX.utils.json_to_sheet(rows.length?rows:[Object.fromEntries(cols.map(c=>[c,'']))],{header:cols});ws['!cols']=cols.map(c=>({wch:Math.max(12,c.length+2,...rows.map(r=>String(r[c]??'').length+2).slice(0,500))>60?60:Math.max(12,c.length+2,...rows.map(r=>String(r[c]??'').length+2))}));XLSX.utils.book_append_sheet(wb,ws,name)};
-    add(studentsRows,'Students',['Name','Email','Reference','Group','Trial','Private pack','Photo consent','Joined']);
+    add(studentsRows,'Students',['Name','Email','Reference','Group','Trial','Private pack','Total paid (€)','Still owed (€)','Photo consent','Joined']);
     add(payRows,'Payments',['Student','Reference','Description','Amount (€)','Status','Due date','Paid on','Added']);
     add(attRows,'Attendance',['Date','Class','Group','Student','Present']);
     add(privRows,'Private lessons',['Student','Date & time','Status']);
