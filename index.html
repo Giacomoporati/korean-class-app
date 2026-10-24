@@ -136,7 +136,7 @@ footer{text-align:center;font-size:12px;color:var(--muted);padding:12px 16px 4px
 <div id="root"><p style="padding:60px 16px;text-align:center">Loading…</p></div>
 <div id="toast" class="toast" hidden></div>
 <div id="busy" class="busy" hidden>Saving…</div>
-<footer>Version 3.0 (24 Oct) · Hangeul Institute Dublin · <a href="privacy.html">Privacy</a></footer>
+<footer>Version 3.3 (24 Oct) · Hangeul Institute Dublin · <a href="privacy.html">Privacy</a></footer>
 
 <script>
 /* ---------- Connection (publishable key is safe to be public; security is enforced by database rules) */
@@ -175,7 +175,8 @@ let ui={tab:null,week:null,group:'beg2',filter:'all'};
 const isT=()=>S.me&&S.me.role==='teacher';
 const prof=id=>S.profiles.find(p=>p.id===id)||{full_name:'(removed)',email:''};
 const nm=p=>p.full_name||p.email||'Student';
-const students=()=>S.profiles.filter(p=>p.role==='student');
+const allStudents=()=>S.profiles.filter(p=>p.role==='student');
+const students=()=>allStudents().filter(p=>!p.archived);
 
 async function q(p){const {data,error}=await p;if(error)throw error;return data}
 
@@ -206,8 +207,11 @@ async function loadAll(){
 }
 
 /* ---------- term logic: a term = consecutive Saturdays; 10 classes; class 10 = Game Day */
-function terms(){const out=[];let cur=[];for(const w of S.weeks){if(cur.length&&pd(w.date)-pd(cur[cur.length-1].date)>8*DAY){out.push(cur);cur=[]}cur.push(w)}if(cur.length)out.push(cur);return out}
+function terms(){const flags=S.weeks.some(w=>w.new_term);const out=[];let cur=[];for(const w of S.weeks){if(cur.length&&(flags?w.new_term:pd(w.date)-pd(cur[cur.length-1].date)>8*DAY)){out.push(cur);cur=[]}cur.push(w)}if(cur.length)out.push(cur);return out}
+const gapWeeks=(a,b)=>Math.round((pd(b)-pd(a))/(7*DAY))-1;
 function term(){const t=today(),ts=terms();return ts.find(x=>pd(x[x.length-1].date)>=t)||ts[ts.length-1]||[]}
+function allWeeks(){return terms().flatMap((tw,ti)=>numbered(tw).map(w=>({...w,term:ti+1,termW:tw})))}
+function termAfter(tw){if(!tw.length)return null;const end=pd(tw[tw.length-1].date);return terms().find(x=>pd(x[0].date)>end)||null}
 function numbered(tw){let n=0;return tw.map(w=>w.type==='break'?{...w,no:null,kind:'break'}:(n++,{...w,no:n,kind:n===10?'game':'class'}))}
 const termOver=tw=>!tw.length||pd(tw[tw.length-1].date)<today();
 const breakStart=tw=>addDays(tw[tw.length-1].date,7);
@@ -282,12 +286,12 @@ function vStudentHome(){
       ${next?`<p style="margin:6px 0 2px" class="muted small">Next class</p><div class="row"><b style="font-size:20px">${fd(next.date)}</b>${weekBadge(next)}</div>
       <p class="small muted" style="margin:6px 0 0">${next.mode==='online'?'Online: tap “Online class” at class time':'📍 '+ADDRESS}</p>`:'<p style="margin:0">The next term dates will appear here soon.</p>'}</div>`;
     if(me.group_code&&tw.length){
-      const brk=tw.find(w=>w.kind==='break'&&pd(w.date)>=t);
+      const brk=tw.find(w=>w.kind==='break'&&pd(w.date)>=t), nt=termAfter(tw), bw=nt?gapWeeks(tw[tw.length-1].date,nt[0].date):S.settings.break_weeks;
       h+=`<div class="grid2"><div class="card tile"><div class="lbl">Classes left</div><div class="big">${left}</div><div class="small muted">this term</div></div>
-        <div class="card tile"><div class="lbl">Next break</div><div class="big" style="font-size:20px;margin-top:6px">${fd(brk?brk.date:breakStart(tw))}</div><div class="small muted">${brk?'1 week':(S.settings.break_weeks+(S.settings.break_weeks===1?' week':' weeks'))}</div></div></div>
+        <div class="card tile"><div class="lbl">Next break</div><div class="big" style="font-size:20px;margin-top:6px">${fd(brk?brk.date:breakStart(tw))}</div><div class="small muted">${brk?'1 week':(bw+(bw===1?' week':' weeks'))}</div></div></div>
         <div class="card"><h3>Term schedule</h3><ul class="list">${tw.map(w=>`<li class="${pd(w.date)<t?'past':''}"><span>${fd(w.date)}<br><span class="small muted">${weekLabel(w)}</span></span>${weekBadge(w)}</li>`).join('')}
-        <li><span>${fd(breakStart(tw))}<br><span class="small muted">Break: ${S.settings.break_weeks} ${S.settings.break_weeks===1?'week':'weeks'}</span></span><span class="badge b-break">Break</span></li>
-        <li><span>${fd(nextTerm(tw))}<br><span class="small muted">Next term starts</span></span><span class="badge b-on">New term</span></li></ul></div>`;
+        <li><span>${fd(breakStart(tw))}<br><span class="small muted">Break between terms</span></span><span class="badge b-break">Break</span></li>
+        <li><span>${fd(termAfter(tw)?termAfter(tw)[0].date:nextTerm(tw))}<br><span class="small muted">Next term starts</span></span><span class="badge b-on">New term</span></li></ul></div>`;
     }
   }
   const pi=packInfo(me);
@@ -336,26 +340,57 @@ function vStudentInfo(){
 }
 
 /* ---------- TEACHER */
-function vStartTerm(tw){
-  return `<div class="card"><h3>${tw.length?'Start the next term':'Start your first term'}</h3>
-    <p class="small muted" style="margin:0 0 10px">Pick the first Saturday. The app creates 10 Saturdays; class 10 is Game Day.</p>
-    <div class="field"><label for="termStart">First class</label><input class="inp" id="termStart" type="date" value="${tw.length?nextTerm(tw):nextSaturday()}"></div>
-    <button class="btn btn-main" data-act="startterm">Create 10 classes</button></div>`;
+function vAddClasses(){
+  const ts=terms(), lastT=ts[ts.length-1]||[], m=ui.addMode||'auto';
+  const def=lastT.length?nextTerm(lastT):nextSaturday();
+  return `<div class="card"><h3>➕ Add classes</h3>
+    <div class="seg" style="margin-bottom:10px"><button class="btn btn-sm ${m==='auto'?'btn-main':'btn-ghost'}" data-act="addmode" data-m="auto">Automatic</button><button class="btn btn-sm ${m==='manual'?'btn-main':'btn-ghost'}" data-act="addmode" data-m="manual">Manual</button></div>
+    ${m==='auto'?`<p class="small muted" style="margin:0 0 10px">Pick the first Saturday. The app creates 10 weekly classes; class 10 is Game Day.</p>
+    <div class="field"><label for="termStart">First class</label><input class="inp" id="termStart" type="date" value="${def}"></div>
+    <button class="btn btn-main" data-act="startterm">Create 10 classes</button>`
+    :`<p class="small muted" style="margin:0 0 10px">Add one class on any date you choose (for example an extra lesson or a make-up class).</p>
+    <div class="field"><label for="oneDate">Date</label><input class="inp" id="oneDate" type="date" value="${def}"></div>
+    <div class="field"><label for="oneMode">Where</label><select class="inp" id="oneMode"><option value="offline">In person</option><option value="online">Online</option><option value="break">Break week (no class)</option></select></div>
+    <label class="check2"><input type="checkbox" id="oneNew"><span>Start a new course with this class</span></label>
+    <button class="btn btn-main" data-act="addone">Add this class</button>`}</div>`;
+}
+function vCourseBreak(w){
+  const nt=termAfter(w.termW), cur=nt?gapWeeks(w.date,nt[0].date):S.settings.break_weeks;
+  return `<div class="card"><h3>🌴 Break after this course</h3>
+    <p class="small muted" style="margin:0 0 10px">${nt?'The next course starts <b>'+fd(nt[0].date)+'</b>, after a <b>'+cur+'-week</b> break.':'No next course yet. This sets the suggested start date for the next one.'}</p>
+    <div class="field"><label for="brkWeeks">Break length (weeks)</label><input class="inp" id="brkWeeks" type="number" min="0" max="12" value="${cur}"></div>
+    <button class="btn btn-main" data-act="setbreak" data-last="${w.date}">${nt?'Change break and move next course':'Save break length'}</button>
+    ${nt?'<p class="small muted" style="margin:6px 0 0">All later classes move by the same amount, so nothing overlaps.</p>':''}</div>`;
+}
+function vEditClass(w){
+  return `<div class="card"><h3>✏️ Edit this ${w.kind==='break'?'week':'class'}</h3>
+    <div class="field"><label for="editDate">Date</label><input class="inp" id="editDate" type="date" value="${w.date}"></div>
+    <button class="btn btn-main" data-act="editdate" data-id="${w.id}">Save new date</button>
+    <button class="link" data-act="delweek" data-id="${w.id}" data-d="${w.date}" style="color:#B0135F;margin-top:6px">Delete this ${w.kind==='break'?'week':'class'}</button>
+    <label class="check2" style="margin-top:12px"><input type="checkbox" data-change="newterm" data-id="${w.id}" ${w.new_term||(w.termW&&w.termW[0].id===w.id&&!S.weeks.some(x=>x.new_term))?'checked':''}><span>This class starts a new course</span></label>
+    <p class="small muted" style="margin:6px 0 0">Attendance and the lesson plan move with the class.</p></div>`;
 }
 function vTeacherClasses(){
   const raw=term(), tw=numbered(raw);
   let h=ttl('Classes','수업')+`<div class="chips">${Object.entries(GROUPS).map(([k,g])=>`<button class="chip ${ui.group===k?'on':''}" data-act="group" data-g="${k}">${g.name} (${students().filter(s=>s.group_code===k).length}/${g.cap})</button>`).join('')}<button class="chip ${ui.group==='private'?'on':''}" data-act="group" data-g="private">Private</button></div>`;
   if(ui.group==='private') return h+vTeacherPrivate();
-  if(termOver(raw)) return h+vStartTerm(raw);
-  if(ui.week==null||ui.week>=tw.length){const i=tw.findIndex(w=>w.kind!=='break'&&pd(w.date)>=today());ui.week=i<0?tw.length-1:i}
-  const i=ui.week, w=tw[i], g=GROUPS[ui.group];
-  h+=`<div class="weeknav"><button data-act="week" data-d="-1" ${i<=0?'disabled':''} aria-label="Previous week">◀</button><div class="mid"><strong>${fd(w.date)}</strong><span class="small muted">${weekLabel(w)} · ${g.time}</span></div><button data-act="week" data-d="1" ${i>=tw.length-1?'disabled':''} aria-label="Next week">▶</button></div>
+  const AW=allWeeks(), ts=terms(), lastT=ts[ts.length-1]||[];
+  if(!AW.length) return h+vAddClasses();
+  if(ui.jumpTo){const j=AW.findIndex(x=>x.date===ui.jumpTo);if(j>=0){ui.week=j;ui.jumpTo=null}}
+  if(ui.week==null||ui.week>=AW.length){const i=AW.findIndex(w=>w.kind!=='break'&&pd(w.date)>=today());ui.week=i<0?AW.length-1:i}
+  const i=ui.week, w=AW[i], g=GROUPS[ui.group];
+  h+=`<div class="weeknav"><button data-act="week" data-d="-1" ${i<=0?'disabled':''} aria-label="Previous week">◀</button><div class="mid"><strong>${fd(w.date)}</strong><span class="small muted">${ts.length>1?'Term '+w.term+' · ':''}${weekLabel(w)} · ${g.time}</span></div><button data-act="week" data-d="1" ${i>=AW.length-1?'disabled':''} aria-label="Next week">▶</button></div>
   <div class="card"><div class="seg">
     <button class="btn btn-sm ${w.kind!=='break'&&w.mode==='offline'?'btn-main':'btn-ghost'}" data-act="mode" data-m="offline">In person</button>
     <button class="btn btn-sm ${w.kind!=='break'&&w.mode==='online'?'btn-main':'btn-ghost'}" data-act="mode" data-m="online">Online</button>
     <button class="btn btn-sm ${w.kind==='break'?'btn-main':'btn-ghost'}" data-act="mode" data-m="break">Break</button></div>
-    <p class="small muted" style="margin:8px 0 0">Applies to both groups on this date. Students see it straight away.</p></div>`;
-  if(w.kind==='break') return h+`<div class="card"><p style="margin:0">Break week (e.g. bank holiday): no class. The term moved one week later so it still has 10 classes.</p></div>`;
+    <p class="small muted" style="margin:8px 0 0">Applies to both groups on this date. Students see it straight away.</p>
+    ${ui.breakAsk===w.id&&w.kind!=='break'?`<div style="margin-top:12px;padding-top:12px;border-top:1.5px solid var(--line)"><b>Make ${fd(w.date)} a break week?</b>
+      <button class="btn btn-main" data-act="mkbreak" data-shift="1">Break + move the rest of the course 1 week later</button>
+      <button class="btn btn-ghost" data-act="mkbreak" data-shift="0">Break, keep the course end date</button>
+      <button class="link" data-act="mkbreak" data-shift="x">Cancel</button></div>`:''}</div>`;
+  const isLast=w.termW&&w.date===w.termW[w.termW.length-1].date;
+  if(w.kind==='break') return h+`<div class="card"><p style="margin:0">Break week: no class on this date.</p></div>`+(isLast?vCourseBreak(w):'')+vEditClass(w)+vAddClasses();
   if(w.kind==='game'){
     const gs=S.guests.filter(x=>x.week_id===w.id);
     h+=`<div class="card"><div class="row"><h3>🎲 Game Day guests</h3><b>${gs.length}</b></div>
@@ -363,15 +398,12 @@ function vTeacherClasses(){
       <ul class="list">${gs.map(x=>`<li><span><b>${esc(x.name)}</b> · ${esc(x.ref)}${x.contact?'<br><span class="small muted">'+esc(x.contact)+'</span>':''}<br>
         <span class="small">€10 upfront: ${x.deposit_status==='paid'?'✅':'⏳'} · €15 on the day: ${x.on_day_status==='paid'?'✅':'⏳'}</span></span>
         <span style="display:flex;flex-direction:column;gap:6px"><button class="btn btn-sm ${x.deposit_status==='paid'?'btn-ghost':'btn-main'}" data-act="gpay" data-id="${x.id}" data-part="deposit_status">${x.deposit_status==='paid'?'Undo €10':'€10 paid'}</button>
-        <button class="btn btn-sm ${x.on_day_status==='paid'?'btn-ghost':'btn-main'}" data-act="gpay" data-id="${x.id}" data-part="on_day_status">${x.on_day_status==='paid'?'Undo €15':'€15 paid'}</button></span></li>`).join('')||'<li class="muted">No guests yet.</li>'}</ul>
+        <button class="btn btn-sm ${x.on_day_status==='paid'?'btn-ghost':'btn-main'}" data-act="gpay" data-id="${x.id}" data-part="on_day_status">${x.on_day_status==='paid'?'Undo €15':'€15 paid'}</button>
+        <button class="x" data-act="delguest" data-id="${x.id}" data-n="${esc(x.name)}" aria-label="Remove guest" style="align-self:center">× Remove</button></span></li>`).join('')||'<li class="muted">No guests yet.</li>'}</ul>
       <div class="field" style="margin-top:10px"><label for="gName">Add a guest</label><input class="inp" id="gName" type="text" placeholder="Name"></div>
       <div class="field"><input class="inp" id="gContact" type="text" placeholder="Phone or email (optional)"></div>
       <button class="btn btn-ghost" data-act="addguest" data-w="${w.id}">Add guest</button></div>
-    <div class="card"><h3>Break after this term</h3><div class="seg">
-      <button class="btn btn-sm ${S.settings.break_weeks===1?'btn-main':'btn-ghost'}" data-act="brk" data-n="1">1 week</button>
-      <button class="btn btn-sm ${S.settings.break_weeks===2?'btn-main':'btn-ghost'}" data-act="brk" data-n="2">2 weeks</button></div>
-      <p class="small muted" style="margin:8px 0 0">Next term starts ${fd(nextTerm(raw))}.</p></div>
-    ${vStartTerm(raw)}`;
+`;
   }
   const list=students().filter(s=>s.group_code===ui.group||s.trial_group===ui.group);
   const att=new Set(S.attendance.filter(a=>a.week_id===w.id).map(a=>a.student_id));
@@ -379,7 +411,7 @@ function vTeacherClasses(){
   h+=`<div class="card"><div class="row"><h3>Attendance</h3><b>${list.filter(s=>att.has(s.id)).length}/${list.length}</b></div>
     ${list.map(s=>`<button class="att ${att.has(s.id)?'on':''}" data-act="att" data-id="${s.id}" data-w="${w.id}"><span class="box">${att.has(s.id)?'✓':''}</span><span style="flex:1">${esc(nm(s))}${!s.group_code?' <span class="badge b-due">Trial</span>':''}</span>${owes(s.id)?'<span class="badge b-late">€ owed</span>':''}</button>`).join('')||'<p class="muted" style="margin:0">No students in this class yet. Add them in Students.</p>'}</div>
     <div class="card"><h3>Lesson plan</h3><textarea data-plan="${w.id}" data-g="${ui.group}" placeholder="What will you teach this week?">${esc(plan)}</textarea><p class="small muted" style="margin:6px 0 0">Saves automatically. Only you can see this.</p></div>`;
-  return h;
+  return h+(isLast?vCourseBreak(w):'')+vEditClass(w)+vAddClasses();
 }
 function vTeacherPrivate(){
   const up=S.privates.filter(p=>p.status==='booked'||p.status==='resched').sort((a,b)=>new Date(a.starts_at)-new Date(b.starts_at));
@@ -392,10 +424,10 @@ function vTeacherPrivate(){
   <div class="card"><h3>Packs</h3><ul class="list">${students().filter(s=>s.pack_size).map(s=>{const pi=packInfo(s);return `<li><span>${esc(nm(s))}</span><span class="small">${pi.done}/${pi.size} done · ${pi.booked} booked · <b>${pi.left} left</b></span></li>`}).join('')||'<li class="muted">No packs yet. Set one in Students.</li>'}</ul></div>`;
 }
 function vTeacherStudents(){
-  const F={all:()=>true,owes:s=>owes(s.id),beg2:s=>s.group_code==='beg2',imp:s=>s.group_code==='imp',private:s=>!!s.pack_size,none:s=>!s.group_code&&!s.trial_group&&!s.pack_size};
-  const list=students().filter(F[ui.filter]);
+  const F={all:()=>true,owes:s=>owes(s.id),beg2:s=>s.group_code==='beg2',imp:s=>s.group_code==='imp',trial:s=>!!s.trial_group,private:s=>!!s.pack_size,none:s=>!s.group_code&&!s.trial_group&&!s.pack_size,removed:()=>true};
+  const list=(ui.filter==='removed'?allStudents().filter(p=>p.archived):students()).filter(F[ui.filter]);
   const opt=(v,cur,l)=>`<option value="${v}" ${String(cur??'')===String(v)?'selected':''}>${l}</option>`;
-  return `${ttl('Students','학생')}<div class="chips">${[['all','All'],['none','New / no class'],['owes','Owe money'],['beg2','Beginner Lv2'],['imp','Improver'],['private','Private']].map(([k,l])=>`<button class="chip ${ui.filter===k?'on':''}" data-act="filter" data-f="${k}">${l}</button>`).join('')}</div>
+  return `${ttl('Students','학생')}<div class="chips">${[['all','All'],['none','New / no class'],['trial','Trial'],['owes','Owe money'],['beg2','Beginner Lv2'],['imp','Improver'],['private','Private'],['removed','Removed']].map(([k,l])=>`<button class="chip ${ui.filter===k?'on':''}" data-act="filter" data-f="${k}">${l}</button>`).join('')}</div>
   ${list.map(s=>`<div class="card"><div class="row"><div><b style="font-size:18px">${esc(nm(s))}</b><br><span class="small muted">${esc(s.email)} · Ref ${esc(s.ref)}</span></div><span title="Instagram photo consent" class="badge ${s.photo_consent?'b-paid':'b-off'}">📸 ${s.photo_consent?'Yes':'No'}</span></div>
     <div class="grid3">
       <div><label>Group</label><select data-change="prof" data-id="${s.id}" data-f="group_code">${opt('',s.group_code,'None')}${opt('beg2',s.group_code,'Beginner Lv2')}${opt('imp',s.group_code,'Improver')}</select></div>
@@ -404,6 +436,7 @@ function vTeacherStudents(){
     </div>
     <ul class="list" style="margin-top:8px">${S.payments.filter(p=>p.student_id===s.id).map(p=>`<li><span class="small">${esc(p.description)}<br><b>${eur(p.amount)}</b> ${payBadge(p)}</span><span style="display:flex;align-items:center"><button class="btn btn-sm ${p.status==='paid'?'btn-ghost':'btn-main'}" data-act="paid" data-id="${p.id}" data-st="${p.status}">${p.status==='paid'?'Undo':'Mark paid'}</button><button class="x" data-act="delpay" data-id="${p.id}" aria-label="Delete payment">×</button></span></li>`).join('')}</ul>
     <div class="payadd"><span class="small muted" style="width:100%">Add a payment to ask for:</span>${Object.entries(PAYKINDS).map(([k,[l,a]])=>`<button class="btn btn-ghost btn-sm" data-act="addpay" data-id="${s.id}" data-k="${k}">${l.split(' (')[0].replace('Private pack – ','Pack ')} ${eur(a)}</button>`).join('')}</div>
+    ${s.archived?`<button class="btn btn-main" data-act="restore" data-id="${s.id}">Restore student</button>`:`<button class="link" data-act="archive" data-id="${s.id}" data-n="${esc(nm(s))}" style="color:#B0135F;margin-top:6px">Remove student from list</button>`}
   </div>`).join('')||'<p class="muted">No students here yet. When students create an account, they appear here.</p>'}`;
 }
 function vTeacherMoney(){
@@ -445,7 +478,7 @@ async function exportBackup(){
     const info={}; terms().forEach(tw=>numbered(tw).forEach(w=>info[w.id]=w));
     const wk=id=>info[id]||{};
     const sumFor=(id,st)=>S.payments.filter(x=>x.student_id===id&&x.status===st).reduce((t,x)=>t+Number(x.amount),0);
-    const studentsRows=students().map(p=>({Name:nm(p),Email:p.email,Reference:p.ref,Group:gName(p.group_code),Trial:gName(p.trial_group),'Private pack':p.pack_size||'','Total paid (€)':sumFor(p.id,'paid'),'Still owed (€)':sumFor(p.id,'due'),'Photo consent':p.photo_consent?'Yes':'No',Joined:d10(p.created_at)}));
+    const studentsRows=allStudents().map(p=>({Status:p.archived?'Removed':'Active',Name:nm(p),Email:p.email,Reference:p.ref,Group:gName(p.group_code),Trial:gName(p.trial_group),'Private pack':p.pack_size||'','Total paid (€)':sumFor(p.id,'paid'),'Still owed (€)':sumFor(p.id,'due'),'Photo consent':p.photo_consent?'Yes':'No',Joined:d10(p.created_at)}));
     if(studentsRows.length) studentsRows.push({Name:'TOTAL','Total paid (€)':studentsRows.reduce((t,r)=>t+r['Total paid (€)'],0),'Still owed (€)':studentsRows.reduce((t,r)=>t+r['Still owed (€)'],0)});
     const payRows=S.payments.map(p=>{const s=prof(p.student_id);return {Student:nm(s),Reference:s.ref,Description:p.description,'Amount (€)':Number(p.amount),Status:p.status==='paid'?'Paid':'Due','Due date':p.due_date||'','Paid on':d10(p.paid_at),Added:d10(p.created_at)}})
       .concat(S.guests.flatMap(g=>[
@@ -456,7 +489,7 @@ async function exportBackup(){
     const planRows=S.plans.filter(p=>p.plan).map(p=>{const w=wk(p.week_id);return {Date:w.date||'',Class:w.no||'',Group:gName(p.group_code),'Lesson plan':p.plan}}).sort((a,b)=>(a.Date+a.Group).localeCompare(b.Date+b.Group));
     const wb=XLSX.utils.book_new();
     const add=(rows,name,cols)=>{const ws=XLSX.utils.json_to_sheet(rows.length?rows:[Object.fromEntries(cols.map(c=>[c,'']))],{header:cols});ws['!cols']=cols.map(c=>({wch:Math.max(12,c.length+2,...rows.map(r=>String(r[c]??'').length+2).slice(0,500))>60?60:Math.max(12,c.length+2,...rows.map(r=>String(r[c]??'').length+2))}));XLSX.utils.book_append_sheet(wb,ws,name)};
-    add(studentsRows,'Students',['Name','Email','Reference','Group','Trial','Private pack','Total paid (€)','Still owed (€)','Photo consent','Joined']);
+    add(studentsRows,'Students',['Status','Name','Email','Reference','Group','Trial','Private pack','Total paid (€)','Still owed (€)','Photo consent','Joined']);
     add(payRows,'Payments',['Student','Reference','Description','Amount (€)','Status','Due date','Paid on','Added']);
     add(attRows,'Attendance',['Date','Class','Group','Student','Present']);
     add(privRows,'Private lessons',['Student','Date & time','Status']);
@@ -521,16 +554,16 @@ document.addEventListener('click',e=>{
   if(a==='group'){ui.group=d.g;render();return}
   if(a==='filter'){ui.filter=d.f;render();return}
   if(a==='week'){ui.week=Math.max(0,ui.week+Number(d.d));render();return}
-  const tw=term(), w=numbered(tw)[ui.week];
+  const w=allWeeks()[ui.week]||{}, tw=w.termW||term();
+  if(a==='mode'&&d.m==='break'){if(w.type!=='break'){ui.breakAsk=w.id;render()}return}
   if(a==='mode') return run(async()=>{
-    const m=d.m, last=tw[tw.length-1];
-    if(m==='break'){if(w.type==='break')return;
-      await q(sb.from('weeks').update({type:'break'}).eq('id',w.id));
-      await q(sb.from('weeks').insert({date:addDays(last.date,7),type:'class',mode:'offline'}));
-    }else if(w.type==='break'){
+    const m=d.m;
+    if(m==='break'){if(w.type!=='break')ui.breakAsk=w.id;return}
+    if(w.type==='break'){
       await q(sb.from('weeks').update({type:'class',mode:m}).eq('id',w.id));
-      const cls=tw.filter(x=>x.type!=='break');
-      if(cls.length>=10) await q(sb.from('weeks').delete().eq('id',cls[cls.length-1].id));
+      const cls=tw.filter(x=>x.type!=='break'), lastC=cls[cls.length-1];
+      if(cls.length>=10&&lastC&&lastC.id!==w.id&&confirm('The course now has an extra class. Remove the last class ('+fd(lastC.date)+') so it ends on the same date as before?'))
+        await q(sb.from('weeks').delete().eq('id',lastC.id));
     }else await q(sb.from('weeks').update({mode:m}).eq('id',w.id));
   },'Schedule updated');
   if(a==='att') return run(async()=>{
@@ -538,14 +571,63 @@ document.addEventListener('click',e=>{
     if(has) await q(sb.from('attendance').delete().eq('week_id',d.w).eq('student_id',d.id));
     else await q(sb.from('attendance').insert({week_id:Number(d.w),student_id:d.id,present:true}));
   });
+  if(a==='addmode'){ui.addMode=d.m;render();return}
+  if(a==='addone') return run(async()=>{
+    const dt=val('oneDate'); if(!dt) throw new Error('Pick a date first');
+    if(S.weeks.some(x=>x.date===dt)) throw new Error('There is already a class on '+fd(dt)+'.');
+    const md=val('oneMode')||'offline';
+    await q(sb.from('weeks').insert({date:dt,type:md==='break'?'break':'class',mode:md==='break'?'offline':md,new_term:!!(document.getElementById('oneNew')||{}).checked}));
+    ui.week=null; ui.jumpTo=dt;
+  },'Class added');
+  if(a==='editdate') return run(async()=>{
+    const dt=val('editDate'); if(!dt) throw new Error('Pick a date first');
+    const cur=S.weeks.find(x=>String(x.id)===d.id); if(cur&&cur.date===dt) return;
+    if(S.weeks.some(x=>x.date===dt)) throw new Error('There is already a class on '+fd(dt)+'.');
+    await q(sb.from('weeks').update({date:dt}).eq('id',d.id));
+    ui.week=null; ui.jumpTo=dt;
+  },'Date changed');
+  if(a==='delweek'){if(!confirm('Delete the class on '+fd(d.d)+'?\n\nIts attendance and lesson plan will also be deleted.'))return;
+    return run(async()=>{await q(sb.from('weeks').delete().eq('id',d.id));ui.week=null},'Class deleted')}
+  if(a==='mkbreak'){
+    if(d.shift==='x'){ui.breakAsk=null;render();return}
+    return run(async()=>{
+      ui.breakAsk=null;
+      await q(sb.from('weeks').update({type:'break'}).eq('id',w.id));
+      if(d.shift==='1'){
+        const nd=addDays(tw[tw.length-1].date,7);
+        if(S.weeks.some(x=>x.date===nd)) throw new Error('Marked as break, but the next course starts on '+fd(nd)+', so no extra class was added. Use "Break after this course" to move the next course first.');
+        await q(sb.from('weeks').insert({date:nd,type:'class',mode:'offline'}));
+      }
+    },'Break added');
+  }
+  if(a==='setbreak') return run(async()=>{
+    const n=Math.max(0,Math.min(12,parseInt(val('brkWeeks'),10)||0));
+    await q(sb.from('settings').update({break_weeks:n,updated_at:new Date().toISOString()}).eq('id',1));
+    const lastD=d.last, nt=termAfter(tw);
+    if(!nt) return;
+    const delta=7*(n+1)-Math.round((pd(nt[0].date)-pd(lastD))/DAY);
+    if(!delta) return;
+    const target=addDays(nt[0].date,delta);
+    const later=S.weeks.filter(x=>pd(x.date)>pd(lastD)).sort((a,b)=>delta>0?pd(b.date)-pd(a.date):pd(a.date)-pd(b.date));
+    for(const x of later) await q(sb.from('weeks').update({date:addDays(x.date,delta)}).eq('id',x.id));
+    ui.week=null; ui.jumpTo=target;
+  },'Break updated');
   if(a==='startterm') return run(async()=>{
     const s=val('termStart'); if(!s) throw new Error('Pick a date first');
     if(pd(s).getDay()!==6&&!confirm('That date is not a Saturday. Use it anyway?')) return;
-    await q(sb.from('weeks').insert([...Array(10)].map((_,i)=>({date:addDays(s,7*i),type:'class',mode:'offline'}))));
-    ui.week=null;
+    const have=new Set(S.weeks.map(x=>x.date));
+    const rows=[...Array(10)].map((_,i)=>({date:addDays(s,7*i),type:'class',mode:'offline',new_term:i===0})).filter(r=>!have.has(r.date));
+    if(!rows.length) throw new Error('This term already exists. Use ▶ to see it.');
+    if(rows.length<10&&!confirm('Some of these Saturdays are already in another term. Add only the '+rows.length+' free dates?')) return;
+    await q(sb.from('weeks').insert(rows));
+    ui.week=null; ui.jumpTo=s;
   },'Term created: 10 classes');
   if(a==='brk') return run(()=>q(sb.from('settings').update({break_weeks:Number(d.n),updated_at:new Date().toISOString()}).eq('id',1)),'Break updated');
   if(a==='addguest') return run(async()=>{const n=val('gName');if(!n)throw new Error('Type the guest name first');await q(sb.from('game_day_guests').insert({week_id:Number(d.w),name:n,contact:val('gContact')||null}))},'Guest added');
+  if(a==='delguest'){if(!confirm('Remove '+d.n+' from the Game Day guests?'))return;return run(()=>q(sb.from('game_day_guests').delete().eq('id',d.id)),'Guest removed')}
+  if(a==='archive'){if(!confirm('Remove '+d.n+' from your student list?\n\nThey are taken out of all classes and lose access to homework and online class. Their payment history is kept. You can restore them later under "Removed".'))return;
+    return run(()=>q(sb.from('profiles').update({archived:true,group_code:null,trial_group:null,pack_size:null}).eq('id',d.id)),'Student removed')}
+  if(a==='restore') return run(()=>q(sb.from('profiles').update({archived:false}).eq('id',d.id)),'Student restored');
   if(a==='gpay') return run(async()=>{const g=S.guests.find(x=>x.id===d.id);await q(sb.from('game_day_guests').update({[d.part]:g[d.part]==='paid'?'due':'paid'}).eq('id',d.id))});
   if(a==='paid') return run(()=>q(sb.from('payments').update(d.st==='paid'?{status:'due',paid_at:null}:{status:'paid',paid_at:new Date().toISOString()}).eq('id',d.id)),d.st==='paid'?'Marked as not paid':'Marked as paid');
   if(a==='delpay'){if(!confirm('Delete this payment?'))return;return run(()=>q(sb.from('payments').delete().eq('id',d.id)),'Payment deleted')}
@@ -562,6 +644,13 @@ document.addEventListener('click',e=>{
 document.addEventListener('change',e=>{
   const el=e.target;
   if(el.dataset.change==='consent') return run(()=>q(sb.from('profiles').update({photo_consent:el.checked}).eq('id',S.me.id)),el.checked?'Photo consent saved':'Photo consent removed');
+  if(el.dataset.change==='newterm'){
+    const on=el.checked, id=el.dataset.id;
+    return run(async()=>{
+      if(!S.weeks.some(x=>x.new_term)){ const firsts=terms().map(t=>t[0].id); for(const f of firsts) await q(sb.from('weeks').update({new_term:true}).eq('id',f)); }
+      await q(sb.from('weeks').update({new_term:on}).eq('id',id));
+    },on?'This class now starts a new course':'Joined to the previous course');
+  }
   if(el.dataset.change==='prof'){const v=el.value===''?null:(el.dataset.f==='pack_size'?Number(el.value):el.value);return run(()=>q(sb.from('profiles').update({[el.dataset.f]:v}).eq('id',el.dataset.id)),'Student updated')}
 });
 let planT;
